@@ -745,7 +745,7 @@ def concat_gdf(gdf_list):
         gdf.crs='epsg:4326'  # sometimes the first geodataframe in a list may be empty, causing the result not to have a coordinate system.
     return gdf
 
-def makebboxgdf(min_y, max_y, min_x, max_x, crs='EPSG:4326'):
+def makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326'):
     """ Creates a gdf from bounding box coordinates.
     Source: https://github.com/ICESAT-2HackWeek/2022-snow-dem-large/commits/main/notebooks/create_bbox.ipynb
     
