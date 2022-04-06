@@ -17,7 +17,7 @@ import time
 import numpy as np
 import datetime
 from pyproj import CRS
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point, LineString, Polygon
 from geopandas import GeoSeries
 import matplotlib.pyplot as plt
 try:
@@ -691,6 +691,18 @@ def getUTMcrs(geodataset):
        crs = CRS.from_string('+proj=utm +zone='+str(int(utm))) 
     return crs
 
+def getUTMcrslatlon(lat,lon):
+    """ USAGE: crs = getUTMcrslatlon(lat,lon) - crs in correct UTM zone for data in lat/lon"""
+    utm = np.round((183 + lon)/6)
+    if utm > 60:
+        print('Coordinates need to be in lat/lon.')
+        raise Exception(('UTM zone cannot be computed. Already in UTM..?'))
+    if lat<0: # south
+       crs = CRS.from_string('+proj=utm +zone='+str(int(utm))+'+south')
+    else:
+       crs = CRS.from_string('+proj=utm +zone='+str(int(utm))) 
+    return crs
+
 def sstats(GT_all, slist=['mean','min','max']):
     #GT_all=GT_ortho_all
     for ss in slist:
@@ -733,12 +745,29 @@ def concat_gdf(gdf_list):
         gdf.crs='epsg:4326'  # sometimes the first geodataframe in a list may be empty, causing the result not to have a coordinate system.
     return gdf
 
+def makebboxgdf(min_y, max_y, min_x, max_x, crs='EPSG:4326'):
+    """ Creates a gdf from bounding box coordinates.
+    Source: https://github.com/ICESAT-2HackWeek/2022-snow-dem-large/commits/main/notebooks/create_bbox.ipynb
+    
+    Usage: makebboxgdf(min_y, max_y, min_x, max_x, crs='EPSG:4326')
+        min_y etc:  corner coordinates of the bounding box.
+        crs:    coordinate reference system the coordinates are in. 
+    Output: polygon as a geodataframe
+    """
+    # create polygon coordinates from values
+    coords = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y), (min_x, max_y)]
+    # convert bbox to polygon
+    poly_geom = Polygon(coords)
+    # apply crs and create geopandas
+    polygon = gpd.GeoDataFrame(index=[0], crs=crs, geometry=[poly_geom]) 
+    
+    return polygon
 
 
 """ convert rgts to gdf """
 
-def convertRGTtogdf(cycles, RGTfolder='N:/science/ICESat-2/tracks/RGT/'):
-    """ USAGE: convertRGTtogdf(cycles, RGTfolder='N:/science/ICESat-2/tracks/RGT/')
+def convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/snowdepth/ICESat-2/tracks/RGT/'):
+    """ USAGE: convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/snowdepth/ICESat-2/tracks/RGT/')
         Reads kml files and converts all tracks of one cycle to one geodataframe.
         The geodataframe is saved as geojson and pkl files. 
     Input:    
