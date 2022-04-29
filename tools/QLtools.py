@@ -20,7 +20,7 @@ def read_files(files_list, files_fld, bounds):
 
             # open the file
             with h5py.File(files_fld + is2_file, 'r') as f:
-                print('one file done')
+                
 
                 # load into the appender latitude, longitude, best fit and ancillary data as date and beam name
 
@@ -112,7 +112,7 @@ def points2multilines(gf):
             gf_sub = gf[gf.date==date]
             gf_sub = gf_sub[gf_sub.beam==beam]
 
-            if gf_sub.size != 0:
+            if gf_sub.shape[0] > 2:
                 # sort the data from north to south
                 gf_sub.sort_values(by='lat',axis=0, inplace=True)
 
