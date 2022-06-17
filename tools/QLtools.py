@@ -129,21 +129,38 @@ def points2multilines(gf):
                 # iterate trough the points
                 for i in gf_sub.index[:-1]:
                     
-                    # check if the following point is farer than about 100 m 
                     dist=gf_sub.loc[i].geometry.distance(gf_sub.loc[i+1].geometry)
+                    
+                    dist_from_last=gf_sub.loc[i].geometry.distance(gf_sub.loc[start_index].geometry)
 
-                    if dist>0.001:
+                    # check if the following point is farer than about 100 m 
+
+                    if dist > 0.001 :
 
                         #if so, the line should end at THIS point
                         geom=LineString([gf_sub.loc[start_index].geometry,gf_sub.loc[i].geometry])
-
-                        
 
                         # the first point of the next line should be the following point
                         start_index=i+1
 
                         #add this line to the line list
                         multiline_i.append(geom)
+                        
+                    # if this point is further than 10km from the last point in the multiline:
+                    else:
+                        if dist_from_last > 0.1:
+                        
+                            #if so, the line should end at THIS point
+                            geom=LineString([gf_sub.loc[start_index].geometry,gf_sub.loc[i].geometry])
+                            
+                            # the first point of the next line should be the same point (no gap wanted)
+                            start_index=i
+
+                            #add this line to the line list
+                            multiline_i.append(geom)
+
+
+
                 
                 dist=gf_sub.loc[i].geometry.distance(gf_sub.loc[i-1].geometry)
                 
