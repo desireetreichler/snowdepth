@@ -23,59 +23,80 @@ def read_files(files_list, files_fld, bounds):
                 
 
                 # load into the appender latitude, longitude, best fit and ancillary data as date and beam name
+                try:
+                    n= f['gt2l/land_segments/longitude'][:].shape[0]
+                    appender.append(pd.DataFrame(data={
+                                                'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                                 'lat': f['gt2l/land_segments/latitude'][:],
+                                                 'lon': f['gt2l/land_segments/longitude'][:],
+                                                 'h_te_best_fit': f['gt2l/land_segments/terrain/h_te_best_fit'][:],
+                                                 'beam': np.repeat('2l',n)})
+                                   )
+                except:
+                    pass
+                
+                try:
+                    n= f[('gt2r/land_segments/longitude')][:].shape[0]
+                    appender.append(pd.DataFrame(data={
+                                                'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                                 'lat': f['gt2r/land_segments/latitude'][:],
+                                                 'lon': f['gt2r/land_segments/longitude'][:],
+                                                 'h_te_best_fit': f['gt2r/land_segments/terrain/h_te_best_fit'][:],
+                                                 'beam': np.repeat('2r',n)})
+                                   )
+                except:
+                    pass
+                
+                try:
+                    
+                    n= f['gt1r/land_segments/longitude'][:].shape[0]        
+                    appender.append(pd.DataFrame(data={
+                                'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                 'lat': f['gt1r/land_segments/latitude'][:],
+                                 'lon': f['gt1r/land_segments/longitude'][:],
+                                 'h_te_best_fit': f['gt1r/land_segments/terrain/h_te_best_fit'][:],
+                                 'beam':np.repeat('1r',n)}))
+                except:
+                    pass
+                
+                try:
 
-                n= f['gt2l/land_segments/longitude'][:].shape[0]
-                appender.append(pd.DataFrame(data={
-                                            'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                                             'lat': f['gt2l/land_segments/latitude'][:],
-                                             'lon': f['gt2l/land_segments/longitude'][:],
-                                             'h_te_best_fit': f['gt2l/land_segments/terrain/h_te_best_fit'][:],
-                                             'beam': np.repeat('2l',n)})
-                               )
-
-                n= f[('gt2r/land_segments/longitude')][:].shape[0]
-                appender.append(pd.DataFrame(data={
-                                            'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                                             'lat': f['gt2r/land_segments/latitude'][:],
-                                             'lon': f['gt2r/land_segments/longitude'][:],
-                                             'h_te_best_fit': f['gt2r/land_segments/terrain/h_te_best_fit'][:],
-                                             'beam': np.repeat('2r',n)})
-                               )
-
-                n= f['gt1r/land_segments/longitude'][:].shape[0]        
-                appender.append(pd.DataFrame(data={
-                            'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                             'lat': f['gt1r/land_segments/latitude'][:],
-                             'lon': f['gt1r/land_segments/longitude'][:],
-                             'h_te_best_fit': f['gt1r/land_segments/terrain/h_te_best_fit'][:],
-                             'beam':np.repeat('1r',n)}))
-
-
-                n= f['gt1l/land_segments/longitude'][:].shape[0]
-                appender.append(pd.DataFrame(data={
-                                    'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                                     'lat': f['gt1l/land_segments/latitude'][:],
-                                     'lon': f['gt1l/land_segments/longitude'][:],
-                                     'h_te_best_fit': f['gt1l/land_segments/terrain/h_te_best_fit'][:],
-                                     'beam':np.repeat('1l',n)})
-                                )
-
-                n= f['gt3l/land_segments/longitude'][:].shape[0]        
-                appender.append(pd.DataFrame(data={
-                            'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                             'lat': f['gt3l/land_segments/latitude'][:],
-                             'lon': f['gt3l/land_segments/longitude'][:],
-                             'h_te_best_fit': f['gt3l/land_segments/terrain/h_te_best_fit'][:],
-                             'beam':np.repeat('3l',n)})
-                               )
-                n= f['gt3r/land_segments/longitude'][:].shape[0]        
-                appender.append(pd.DataFrame(data={
-                            'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
-                             'lat': f['gt3r/land_segments/latitude'][:],
-                             'lon': f['gt3r/land_segments/longitude'][:],
-                             'h_te_best_fit': f['gt3r/land_segments/terrain/h_te_best_fit'][:],
-                             'beam':np.repeat('3r',n)})
-                               )
+                    n= f['gt1l/land_segments/longitude'][:].shape[0]
+                    appender.append(pd.DataFrame(data={
+                                        'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                         'lat': f['gt1l/land_segments/latitude'][:],
+                                         'lon': f['gt1l/land_segments/longitude'][:],
+                                         'h_te_best_fit': f['gt1l/land_segments/terrain/h_te_best_fit'][:],
+                                         'beam':np.repeat('1l',n)})
+                                    )
+                except:
+                    pass
+                
+                try:
+                    
+                    n= f['gt3l/land_segments/longitude'][:].shape[0]        
+                    appender.append(pd.DataFrame(data={
+                                'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                 'lat': f['gt3l/land_segments/latitude'][:],
+                                 'lon': f['gt3l/land_segments/longitude'][:],
+                                 'h_te_best_fit': f['gt3l/land_segments/terrain/h_te_best_fit'][:],
+                                 'beam':np.repeat('3l',n)})
+                                   )
+                except:
+                    pass
+                                
+                try:
+                    n= f['gt3r/land_segments/longitude'][:].shape[0]        
+                    appender.append(pd.DataFrame(data={
+                                'date':np.repeat(np.datetime64(f['ancillary_data/data_start_utc'][0][:10]),n),
+                                 'lat': f['gt3r/land_segments/latitude'][:],
+                                 'lon': f['gt3r/land_segments/longitude'][:],
+                                 'h_te_best_fit': f['gt3r/land_segments/terrain/h_te_best_fit'][:],
+                                 'beam':np.repeat('3r',n)})
+                                   )
+                except:
+                    pass
+                                
     #concatenate the appender
     is2 = pd.concat(appender)
     
@@ -183,4 +204,8 @@ def points2multilines(gf):
     #concat the created geodataframes, and set the crs.
     gf_lines = pd.concat(appender) 
     gf_lines.crs='epsg:7661'    
+    
+    gf_lines.index=gf_lines.date
+    gf_lines.drop(columns='date',inplace=True)
+    
     return gf_lines
