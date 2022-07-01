@@ -41,9 +41,9 @@ from statistics import mean
 from xml.etree import ElementTree as ET
 
 
-def getIC2data(uid,email,short_name,start_date, end_date, foldername, requesttype, aoilist, start_time='00:00:00', end_time='23:59:59'):
+def getIC2data(uid,email,pswd, short_name,start_date, end_date, foldername, requesttype, aoilist, start_time='00:00:00', end_time='23:59:59'):
     """Function to download ICESat-2 ATLAS data. Usage:
-        getIC2data(uid,email,short_name,start_date, end_date, foldername, 
+        getIC2data(uid,email,short_name,pswd, start_date, end_date, foldername, 
                    requesttype, aoilist, start_time='00:00:00', end_time='23:59:59')
         Downloads the requested data according to the parameters and stores it 
         in the provided foldername. Requires an EarthData account. The password 
@@ -51,12 +51,13 @@ def getIC2data(uid,email,short_name,start_date, end_date, foldername, requesttyp
         
         uid:    EarthData user name
         email:  EarthData email address, data download links are sendt there
+        pswd:   the prompt below stopped to work
         short_name:     ATL product, e.g. 'ATL08'
         start_date / end_date:     date in format '2018-01-01'
         foldername:     e.g. granules/ATL08_locationXX_date. Is created if it
                         doesn't exist.
         requesttype:    'subsetting' (spatial) or 'native' (entire granules)
-        aoilist:    1.) either a four elements bounding box list with 
+        aoilist:    1.) either a four elements bounding box list in 'W,S,E,N' format
                         ['LL_lon','LL_lat','UR_lon','UR_lat']
                     2.) or a two-entry list of two lists of longitude / latitude 
                         coordinates defining a polygon (not tested)
@@ -65,7 +66,7 @@ def getIC2data(uid,email,short_name,start_date, end_date, foldername, requesttyp
         start_time /end_time:   default set to '00:00:00'/'23:59:59'
         
         Example for Désirée:
-            getIC2data('himmmelblau','desiree.treichler@geo.uio.no', 'ATL_08',
+            getIC2data('himmmelblau','desiree.treichler@geo.uio.no', 'XXXX', 'ATL08',
                        '2018-09-01','2022-12-31', 'I:/science/ICESat-2/granules/ATL08_testfolder',
                        'subsetting', ['70','39','71','40'])
         """
@@ -80,7 +81,7 @@ def getIC2data(uid,email,short_name,start_date, end_date, foldername, requesttyp
     # uid = 'himmmelblau'
     # # Enter your email address associated with your Earthdata Login account
     # email = 'desiree.treichler@geo.uio.no'
-    pswd = getpass.getpass('Earthdata Login password: ')  # hint: Cheezy
+    # pswd = getpass.getpass('Earthdata Login password: ')  # hint: Cheezy
     
     # # define which data
     # short_name = 'ATL08'   # Input data set ID (e.g. ATL06) of interest here, also known as "short name".
