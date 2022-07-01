@@ -9,6 +9,7 @@ This script contains functions to handle and predict actual ground tracks from R
 import os
 #import sys
 from glob import glob
+import re
 import pickle
 import geopandas as gpd
 import pandas as pd
@@ -20,11 +21,14 @@ from pyproj import CRS
 from shapely.geometry import Point, LineString, Polygon
 from geopandas import GeoSeries
 import matplotlib.pyplot as plt
+from zipfile import ZipFile
 try:
     import contextily as ctx
 except: pass
 
 gpd.io.file.fiona.drvsupport.supported_drivers['KML']='rw' # native gpd has no functionality to read kml
+gpd.io.file.fiona.drvsupport.supported_drivers['KMZ']='rw' # native gpd has no functionality to read kml
+
 
 # import custom modules
 # if os.name=='posix':
@@ -52,14 +56,21 @@ def matchRGTdata(clippedRGT, gdf_08, wd,cycle,ll=0, p=0 ):
         the RGT (GT_ortho) and a parrallel shift in x (GT_xshift)
         rowswithcontent: a list of the row indices of the RGT where we found corresponding ATL08 data.
     """
-    # RGT dates
+    # RGT dates & numbers
     RGTdates = clippedRGT['track']
     RGTdates = [datetime.datetime.strptime(x[-15:-4], '%d-%b-%Y').date() for x in RGTdates]
     RGTdeltatime = [d-datetime.date(2018,1,1) for d in RGTdates] 
     RGTdeltatime = [d.days for d in RGTdeltatime] 
-    # atl08 dates
+    RGTnrs = clippedRGT['RGT']
+    # atl08 dates & RGT numbers
     deltatime08 = np.floor(gdf_08['delta_time'].to_numpy() /3600/24)
     deltatimes, datecounts=np.unique(deltatime08[:],return_counts=True)
+    try:
+        RGT08 = gdf_08['RGT'] 
+        noRGTnr = False
+    except: # this only works if the atl08 gdf has the RGT nr - not the case for the oldest downloaded tracks (older version of the scripts...)
+        noRGTnr = True
+            
     #dt =[datetime.date(2018,1,1)+datetime.timedelta(d) for d in deltatimes] 
     #date08 =[datetime.date(2018,1,1)+datetime.timedelta(d) for d in deltatime08] 
     
@@ -73,10 +84,15 @@ def matchRGTdata(clippedRGT, gdf_08, wd,cycle,ll=0, p=0 ):
     for d in np.arange(0,len(RGTdeltatime)):
         #d = 0
         currdt=RGTdeltatime[d]
+        currRGTnr = RGTnrs[d]
         incurrentdate = (deltatime08 == currdt)
         print(RGTdates[d], 'data points: ',sum(incurrentdate))
         #print(RGTdeltatime[d])
         if sum(incurrentdate)>0:
+            # also the RGT number needs to match, as we could have two tracks from the same day
+            if noRGTnr==False:
+                iscurrentRGT= (RGT08==currRGTnr)
+                incurrentdate = iscurrentRGT&incurrentdate                       
             gdf_curr = gdf_08[incurrentdate]
             # check that RGT and gdf are in same coordinate system
             gdfcrs=gdf_curr.crs.to_authority()
@@ -142,6 +158,7 @@ def GTdiststats(currRGT, gdf_curr, cycle, figprefix, p):
         for mean / min / max distances each, for two methods: orthogonally to 
         the RGT (GT_ortho) and a parrallel shift in x (GT_xshift)"""
     RGTcoords = list(currRGT.geometry[0].coords)
+    # make sure the RGT column contains numbers
     try:    
         currRGTnr = int(currRGT.loc[[0],'RGT'])
     except: 
@@ -379,11 +396,11 @@ def predictGTortho(currRGT, s, smin=-1, smax=-1):
     if (smin ==-1)==False:
         if (len(smin)<6):
             smin = s-sd
-        sdict = sdict.append({'min':smin})
+        sdict['min']=smin
     if (smax ==-1)==False:
         if (len(smax)<6):
             smax = s+sd
-        sdict = sdict.append({'max':smax})
+        sdict['max']=smax
         
     ascdesc=(RGTy[1]-RGTy[0])/abs(RGTy[1]-RGTy[0]) # -1: desc, 1: asc
     RGTdx=RGTx[1:]-RGTx[:-1]
@@ -457,11 +474,11 @@ def predictGTxshift(currRGT, s, smin=-1, smax=-1):
     if (smin ==-1)==False:
         if (len(smin)<6):
             smin = s-sd
-        sdict = sdict.append({'min':smin})
+        sdict['min']=smin
     if (smax ==-1)==False:
         if (len(smax)<6):
             smax = s+sd
-        sdict = sdict.append({'max':smax})
+        sdict['max']=smax
     ascdesc=(RGTy[1]-RGTy[0])/abs(RGTy[1]-RGTy[0]) # -1: desc, 1: asc
     
     # make a list of dictionaries with GT lines
@@ -487,21 +504,27 @@ def cleanRGT(clippedRGT):
         explodes multilines, remove horizontal ones, resets index, adds some info etc."""
     clippedRGT = clippedRGT.reset_index(drop=True)
     clippedRGT=clippedRGT.explode() #  there could be several multilinestrings
-    # add RGT number
-    try: # sometimes already renamed
-        RGTnr = clippedRGT['Name']
-    except:
-        try:
-            RGTnr = clippedRGT['RGT']
-            try:
-                RGTnr=RGTnr.str.split()
-                RGTnr = [int(x[1]) for x in RGTnr]
-            except:
-                pass
+    # check whether we have RGT as a number
+    try:
+        if type(clippedRGT['RGT'][0][0])!=int:
+            raise Exception 
+    except: 
+        # add RGT number
+        try: # sometimes already renamed
+            RGTnr = clippedRGT['Name']
         except:
-            RGTnr = clippedRGT['id']
-
-    clippedRGT['RGT']= RGTnr
+            try:
+                RGTnr = clippedRGT['RGT']
+                try:
+                    RGTnr=RGTnr.str.split()
+                    RGTnr = [int(x[1]) for x in RGTnr]
+                except:
+                    pass
+            except:
+                RGTnr = clippedRGT['id']
+    
+        clippedRGT['RGT']= RGTnr
+        
     try:
         clippedRGT.drop(['Name'], axis=1)
     except: 
@@ -530,11 +553,15 @@ def cleanRGT(clippedRGT):
     return clippedRGT
 
 
-def dropfakeRGTs(clippedRGT,v):
+def dropfakeRGTs(clippedRGT,v=1, polar = False):
     """ USAGE: clippedRGT = dropfakeRGTs(clippedRGT,v=1)
-    drops RGTs with an ascending/descanding angle < 2 deg - these are artifacts 
+    drops RGTs with an ascending/descanding angle < 2 deg (< 0.01 deg in polar case)- these are artifacts 
     (where the RGT crossed 0 lon)
-    v=1: verbose"""
+    v=1: verbose
+    polar = False"""
+    anglethres = 2
+    if polar:
+        anglethres = 0.01
     for index,row in clippedRGT.iterrows():
         #print(index,row)
         # linestrings:
@@ -553,7 +580,7 @@ def dropfakeRGTs(clippedRGT,v):
         if v:
             print(angle)
         
-        if abs(angle)<2:
+        if abs(angle)<anglethres:
             clippedRGT.drop(index, inplace=True)
             if v:
                 print('-deleted')
@@ -631,7 +658,6 @@ def clipRGTcycle(RGTfolder, shp, cycle=-1):
     return clippedRGT
 
 
-
 def clipRGTgdf(RGTfolder, shp, cycle=-1):
     """ USAGE: clippedRGT = clipRGTgdf(RGTfolder, shp, cycle=-1)
     this function takes the RGT gdf with the highest cycle number (default),
@@ -673,8 +699,126 @@ def clipRGTgdf(RGTfolder, shp, cycle=-1):
     RGT_gdf=RGT_gdf.to_crs(bufferll.crs)
         
     clippedRGT = gpd.clip(RGT_gdf,bufferll)
+        
     print('elapsed time: %f' %(time.time()-t))   
     return clippedRGT
+
+
+
+def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
+    """ USAGE: loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=0)
+    adds a timestamp string to each RGT of the specified cycle number. The function
+    takes the average/middle timestamps from all timestamp points within the 
+    input shapefile shp, a gdf with a square bounding box.
+    The input RGT gdf (previously clipped with shp) needs to havean integer 
+    column named "RGT" with the RGT numbers (run e.g. cleanRGT to achieve this).
+    Note that each RGT can only be once in the RGT_gdf!! (i.e. no strange clipping shapes)
+    v=1: verbose, prints all loaded tracks etc.
+    Very slow/inefficient function, as it loads all timestamps from the kml..."""
+    # find the RGT nrs of all kml files of the cycle in question
+    #cleanedRGT=cleanRGT(clippedRGT)
+    ti=time.time()
+    RGTcycles = sorted(glob(RGTfolder+'/IS2*'))
+    cyclesplit = [re.split('cycle', x, maxsplit=0, flags=0) for x in RGTcycles ]
+    cyclenrs = [re.split('_date', x[1], maxsplit=0, flags=0) for x in cyclesplit ]
+    cyclenrs = [int(x[0] ) for x in cyclenrs ]
+    cyclematches = [x ==cycle for x in cyclenrs]
+    RGTcycle = [i for (i,v) in zip(RGTcycles,  cyclematches) if v] 
+            
+    # find the kml tracks
+    RGTtracks = glob(RGTcycle[0]+'/*')
+    RGTsplit = [re.split('RGT_', x, maxsplit=0, flags=0) for x in RGTtracks ]
+    RGTnrs = [int(x[1][:4]) for x in RGTsplit ]
+    # match
+    RGTmatches = [(x in clippedRGT.RGT.values) for x in RGTnrs]
+    RGTtrackstoload = [i for (i,v) in zip(RGTtracks,  RGTmatches) if v] 
+    
+    timestamp_list=[None]*len(RGTtrackstoload)
+    
+    # convert shp to UTM and add a 10km buffer, reconvert to lat/lon
+    crs = getUTMcrs(shp)
+    buffer = shp.to_crs(crs).buffer(510000)
+    bufferll = buffer.to_crs('EPSG:4326')
+            
+    for k in np.arange(len(RGTtrackstoload)): 
+        track = RGTtrackstoload[k]
+        timestamps_gdf=gpd.GeoDataFrame()
+        first = True
+        t=time.time()       
+        basename, trackname = os.path.split(track)
+        if v:
+            print('Finding timestamp of track '+trackname)
+        f=fiona.listlayers(track)
+        for t in f:
+            if t[:3]=='RGT':
+                kml = gpd.read_file(track,driver='KML',layer=t) 
+                # append
+                try: 
+                    timestamps_gdf=timestamps_gdf.append(kml)
+                except: # appending to the initialised variable somehow does not work, replace the first time a track is found (an dan error thrown)
+                    if v: 
+                        print('could not append timestamp')    
+                        print(trackname)
+                    if first==True: 
+                        timestamps_gdf=kml
+                        first = False
+                    else: break
+        # clip
+        timestamps_gdf=timestamps_gdf.to_crs(bufferll.crs)
+        timestamps_gdf = timestamps_gdf.reset_index(drop=True)
+        clippedtimestamps= gpd.clip(timestamps_gdf,bufferll)
+        
+        # find timestamp
+        timesplit = [re.split(' DOY', x, maxsplit=0, flags=0) for x in clippedtimestamps.Description.values ]
+        timesplit = [x[0][-20:] for x in timesplit]
+        # take the middle value
+        timestamp = timesplit[int(np.floor(len(timesplit)/2))]
+        timestamp_list[k] = timestamp
+        
+    # add the result to the clipped gdf:
+    clippedRGT['timestamp']=timestamp_list        
+    
+    if v:
+        print('elapsed time: %f' %(time.time()-ti))   
+    return clippedRGT
+
+
+
+
+
+
+
+def clipGTgdf(GTfolder, shp):
+    """ USAGE: clippedRGT = clipRGTgdf(GTfolder, shp)
+    this function takes the GT gdf,
+    and clips all containing GTs with the provided shapefile (a gdf). 
+    Returns: a geodataframe with clipped track lines, and a list with track names."""
+    t=time.time()
+    selectedGTs = sorted(glob(GTfolder+'/*.json'))
+        
+    # check whether the there are several json files (there should be only one)
+    if len(selectedGTs) != 1:
+        print('There should be (only) one .json file in this folder.')
+        return
+    
+    basen, filen = os.path.split(selectedGTs[0])
+    try: # picle is faster but fails in some cases
+        with open(basen+'/'+filen[:-4]+'pkl', 'r') as f: GT_gdf = pickle.load(f)
+    except: # read the geojson object instead
+        with open(basen+'/'+filen, 'r') as f: GT_gdf = gpd.read_file(f)
+    
+    # convert shp to UTM and add a 5km buffer, reconvert to lat/lon
+    crs = getUTMcrs(shp)
+    buffer = shp.to_crs(crs).buffer(5000)
+    bufferll = buffer.to_crs('EPSG:4326')
+    GT_gdf=GT_gdf.to_crs(bufferll.crs)
+        
+    clippedGT = gpd.clip(GT_gdf,bufferll)
+    
+    # remove the horizontal GTs (artefacts of last to first kml point)
+    
+    print('elapsed time: %f' %(time.time()-t))   
+    return clippedGT
 
 
 
@@ -749,8 +893,8 @@ def makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326'):
     """ Creates a gdf from bounding box coordinates.
     Source: https://github.com/ICESAT-2HackWeek/2022-snow-dem-large/commits/main/notebooks/create_bbox.ipynb
     
-    Usage: makebboxgdf(min_y, max_y, min_x, max_x, crs='EPSG:4326')
-        min_y etc:  corner coordinates of the bounding box.
+    Usage: makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326')
+        min_x etc:  corner coordinates of the bounding box.
         crs:    coordinate reference system the coordinates are in. 
     Output: polygon as a geodataframe
     """
@@ -766,6 +910,7 @@ def makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326'):
 
 """ convert rgts to gdf """
 
+# mid-latitudes:
 def convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/snowdepth/ICESat-2/tracks/RGT/'):
     """ USAGE: convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/snowdepth/ICESat-2/tracks/RGT/')
         Reads kml files and converts all tracks of one cycle to one geodataframe.
@@ -776,6 +921,9 @@ def convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/sno
                 default 'N:/science/ICESat-2/tracks/RGT/' has to be adapted!
     Output:     printed file path -> to read: 
                 with open(RGTfolder+'RGTc'+str(cycle)+'.pkl', 'rb') as f: RGT_gdf=pickle.load(f)"""
+    
+    if RGTfolder[-1]!='/':
+        RGTfolder = RGTfolder + '/'
     
     # find how many cycle folders we have
     #RGTfolder = 'N:/science/ICESat-2/tracks/RGT/'
@@ -810,6 +958,68 @@ def convertRGTtogdf(cycles, RGTfolder='lagringshotell.uio.no/geofag/projects/sno
     # to read them: 
     #for cycle in np.arange(0,len(RGTcycles)):
     #    with open(RGTfolder+'RGTc'+str(cycle)+'.pkl', 'rb') as f: RGT_gdf=pickle.load(f)
+    
+    
+
+
+def convertkmlstogdf(kmlfolder): # polar
+    """ USAGE: convertkmlstogdf(kmlfolder)
+        Reads kml files in the folder and converts all tracks to one geodataframe.
+        The geodataframe is saved as geojson and pkl files. 
+    Input:    
+    kmlfolder:  base folder where the kmls are stored, 
+    Output:     printed file path -> to read: 
+                read: with open(kmlfolder+GTname+'.pkl', 'rb') as f: GT_gdf=pickle.load(f) """
+    
+    if kmlfolder[-1]!='/':
+        kmlfolder = kmlfolder + '/'
+    
+    # find how many cycle folders we have
+    #RGTfolder = 'N:/science/ICESat-2/tracks/RGT/'
+    GTs = glob(kmlfolder+'*kmz')
+    
+    # initialise geodataframe   
+    GT_gdf=gpd.GeoDataFrame()
+    #tracklist = []
+    first = True
+    t=time.time()    
+    
+    # loop through GTs
+    for GT in GTs:#np.arange(0,len(RGTcycles)):
+        print('convert GT '+str(GT))
+        # unzip kmz
+        kmz = ZipFile(GT,'r')
+        kmls = kmz.namelist()
+        # there should only be one
+        kml = kmz.open(kmls[0])
+        # list the tracks
+        curr_gdf = gpd.read_file(kml,driver='KML')  
+            # clean up a bit
+        curr_gdf['RGT']=curr_gdf['Name']
+        curr_gdf['GT']=GT[-8:-4]
+        curr_gdf = curr_gdf.reset_index(drop=True)
+        
+        # append
+        try: 
+            GT_gdf=GT_gdf.append(curr_gdf)
+        except: # appending to the initialised variable somehow does not work, replace the first time a track is found (an dan error thrown)
+            print('could not append track')    
+            print(GT)
+            if first==True: 
+                GT_gdf=curr_gdf
+                first = False
+            else: break
+        print('elapsed time: %f' %(time.time()-t))   
+        
+    # save
+    basename, GTname = os.path.split(kmlfolder[:-1])
+    with open(kmlfolder+GTname+'.json', 'w') as f: f.write(GT_gdf.to_json())
+    with open(kmlfolder+GTname+'.pkl', 'wb') as f: pickle.dump(GT_gdf,f) 
+    print('saved: '+kmlfolder+GTname+'.pkl/json')
+    # to read them: 
+    #    with open(kmlfolder+GTname+'.pkl', 'rb') as f: GT_gdf=pickle.load(f)
+
+
 
 def loadRGTs(RGTtracks,v=0):
     """ USAGE: RGT_gdf= loadRGTs(RGItracks,v=1)
