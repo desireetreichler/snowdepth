@@ -114,30 +114,39 @@ def read_files(files_list, files_fld, bounds):
 
 # GeoDataFrame Points --> GeoDataFrame with MultiLineString
 
-def points2multilines(gf):
-    
+def points2multilines(gf, datecol = 'date', beamcol = 'beam'):
+    """Function to convert ICESat-2 ATL_08 data (or ATL_08 quicklook data)
+    to a gdf with lines indicating the strips with data. 
+    Usage: gf_lines = points2multilines(gf, datecol = 'date', beamcol = 'beam')
+    Parameters: 
+        gf      - input point geodataframe
+        datecol - column name indicating the overpass date. Default: 'date'
+        beamcol - coulmn name indicating the beam identifier (six per overpass). Default: 'beam'
+        """
     # define the variable where data will be appended
     appender=[]
 
 
 
     # iterate through the dates and beams we have
-    dates=gf.date.unique()
-    beams=gf.beam.unique()
+    dates=gf[datecol].unique()
+    beams=gf[beamcol].unique()
 
 
     for date in dates:
         for beam in beams:
 
             # select the relevant data 
-            gf_sub = gf[gf.date==date]
-            gf_sub = gf_sub[gf_sub.beam==beam]
+            gf_sub = gf[gf[datecol]==date]
+            gf_sub = gf_sub[gf_sub[beamcol]==beam]
 
             if gf_sub.shape[0] > 2:
                 # sort the data from north to south
-                gf_sub.sort_values(by='lat',axis=0, inplace=True)
-
-
+                try:
+                    gf_sub.sort_values(by='lat',axis=0, inplace=True)
+                except:
+                    gf_sub.sort_values(by='latitude',axis=0, inplace=True)
+                    
                 # and reset the index, so that we can iterate following the north-south order
                 gf_sub.index=np.array(range(gf_sub.shape[0]))
 
@@ -203,9 +212,6 @@ def points2multilines(gf):
                    
     #concat the created geodataframes, and set the crs.
     gf_lines = pd.concat(appender) 
-    gf_lines.crs='epsg:7661'    
-    
-    gf_lines.index=gf_lines.date
-    gf_lines.drop(columns='date',inplace=True)
-    
+    gf_lines.crs='epsg:4326'    
+>>>>>>> upstream/main
     return gf_lines
