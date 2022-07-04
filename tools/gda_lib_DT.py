@@ -1,4 +1,16 @@
-# Original: topolib toolbox -> slightly adjusted as the original produced errors
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jul  1 14:36:36 2022
+
+@author: desireet
+
+This module contains functions to work with ICESat-2 data, elevation raster 
+data (DEMs) and geodataframes. 
+"""
+
+# Developed and built on starting from topolib toolbox 
+# - some functions are adjusted as the original produced errors
+# - most functions are completely my own.
 
 
 import h5py
@@ -10,6 +22,7 @@ import rasterio
 from rasterio import features
 from pyproj import Proj   # assumes we only have one datum (WGMS84) 
 from math import floor
+import datetime
 
 #import rasterstats as rs
 
@@ -18,7 +31,9 @@ import matplotlib.pyplot as plt
 
 
 # TODO sort functions alphabetically and add docstring
- 
+
+
+# ---------------- convert ATL data to geodataframes -------------------------
 #this function is from Ben
 def ATL06_to_dict(filename, dataset_dict):
     """
@@ -134,12 +149,7 @@ def get_ndv(ds):
     return ndv
 
 
-
-
 # ---------------------ATL03/ATL08 tools by Desiree -------------------------------------
-
-
-
 
 # adapted for ATL08 by Desiree
 def ATL08_to_dict(filename, dataset_dict):
@@ -488,8 +498,56 @@ def ATL03_2_gdf(ATL03_fn,dataset_dict=False,aoicoords=False, filterbackground=Fa
     return gdf_final 
 
 
+# wrapper to handle lists of granules, and add some custom parameters
 
-# ---- other tools, original
+def hdf2gdf(ATL_list, ATL_version=8, dataset_dict={}):
+    """ 
+    Load data from granules and add to a single gdf. Add ID number and date
+    to data rows.
+    Usage: hdf2gdf(ATL_list, ATL_version=8, dataset_dict={})
+    ATL_list:     a list with granule filenames to load
+    ATL_version:  8 or 3, default: 8
+    dataset_dict: dictionary for which datasets to add to the dataframe. 
+                  Default available for ATL08 and ALT03 (see function for details).
+    Returns:      gdf: gdf with all points (rows) and parameters in data_dict (columns)
+                  dt: list of dates with data
+    """
+    
+    # check whether dataset_dict is provided
+    if len(dataset_dict)==0:
+        if ATL_version==8:
+            dataset_dict = {'land_segments': ['delta_time', 'longitude', 'latitude', 'dem_h', 'dem_flag', 'msw_flag', 'n_seg_ph',
+                                  'night_flag', 'rgt', 'segment_id', 'segment_landcover', 'segment_snowcover',  # 'surf_type',
+                                  'segment_watercover', 'sigma_h', 'sigma_topo', 'quality', 'terrain_flg'],
+                'land_segments/terrain': ['h_te_best_fit', 'h_te_best_fit_20m','h_te_interp', 'h_te_max', 'h_te_mean', 'h_te_median', 'h_te_min',
+                                          'h_te_mode',
+                                          'h_te_skew', 'h_te_std', 'h_te_uncertainty', 'n_te_photons', 'terrain_slope']}
+        elif ATL_version==3:
+                dataset_dict = {'heights': ['delta_time', 'lon_ph', 'lat_ph', 'h_ph', 'signal_conf_ph'],
+                                'geolocation': ['segment_id', 'segment_ph_cnt']}
+                
+    # load data into a list of gdfs          
+    if ATL_version==8:     
+           gdf_list = [(ATL08_2_gdf(x, dataset_dict)) for x in ATL_list]  # used my own, as the toolbox one caused some errors - maybe for a dataset that had just one point?
+    elif ATL_version==3:    
+           gdf_list = [(ATL03_2_gdf(x, dataset_dict)) for x in ATL_list]  # used my own, as the toolbox one caused some errors - maybe for a dataset that had just one point?
+           
+    # concatenate to a single geodataframe 
+    gdf = concat_gdf(gdf_list)
+           
+    # add ID nr, useful to merge different subsets
+    gdf['ID'] = np.arange(1, len(gdf) + 1)
+    # add date
+    deltatime = np.floor(gdf['delta_time'].to_numpy() /3600/24)
+    currentdates, datecounts=np.unique(deltatime,return_counts=True)
+    dt =[datetime.date(2018,1,1)+datetime.timedelta(d) for d in currentdates] 
+    date =[datetime.date(2018,1,1)+datetime.timedelta(d) for d in deltatime] 
+    gdf['date']=[10000*x.year + 100*x.month +x.day for x in date]
+    gdf['month']=[x.month for x in date]
+    
+    return gdf, dt
+
+# ---- other tools, copied from topolib toolbox, used in some of the wrappers below/above -----------------------------
 
 def dem2polygon(dem_file_name):
     """
@@ -604,9 +662,110 @@ def concat_gdf(gdf_list):
     return gdf
     
     
-### DT TOOLS ###
+### Various tools to work with geodataframes (Desiree) ###
 #------------------------------------------------------------------------"
-# define a function to 
+def overlappingBB(gdfA, gdfB):
+    """ Check whether the total bounding boxes of two geodataframes overlap.
+    Usage: overlappingBB(gdfA, gdfB)
+    Returns True/False """
+    xmin, ymin, xmax, ymax = gdfA.total_bounds
+    xminB, yminB, xmaxB, ymaxB = gdfB.total_bounds
+    result1 =  ((xmin < xmaxB) & (xmax > xminB) & (ymin < ymaxB) & (ymax > yminB) ) 
+    result2 = ((xminB < xmax) & (xmaxB > xmin) & (yminB < ymax) & (ymaxB > ymin) )
+    result = result1|result2
+    return result
+
+# ------------ Point Extract wrapper ----------------------------------
+
+def ic2elevextract(gdf,dem_file,demname):
+    """ Extract elevation data from a DEM at point locations from a geodataframe.
+    The function is based on rasterio. Adds a new column to the gdf.
+    Usage:  ic2elevextract(gdf,dem_file,demname)
+    gdf:        point geodataframe
+    dem_file:   location of a DEM file (will be opened with rasterio)
+    demname:    name of the DEM, will be the column name for the extracted elevation"""
+                           
+    tSTART=time.time()
+    t2=time.time()    
+    
+    # open the elevation file
+    dem_ds = rasterio.open(dem_file)
+    
+    # clip to dem extent  
+    xmin,ymin,xmax,ymax = dem_ds.bounds
+    if (gdf.crs.srs in dem_ds.crs.data['init'])==False: # are they in the same projection?
+        print('reproject to DEM crs...')    
+        gdf_dem_extent = gdf.to_crs(dem_ds.crs).cx[xmin:xmax,ymin:ymax]   # cx: coordinate indexer
+    else: 
+        gdf_dem_extent = gdf.cx[xmin:xmax,ymin:ymax]   # cx: coordinate indexer
+        
+    # sample elevations 
+    #print('sample elevations for '+demname+'...')
+    gdf_dem_extent=elevextrRasterio(gdf_dem_extent,dem_ds,demname)
+    # locate in original gdf
+    gdf.loc[gdf['ID'].isin(gdf_dem_extent['ID']), demname]=gdf_dem_extent[demname]
+    
+    
+    if 0: # debug plot
+        fig,ax = plt.subplots(figsize=(10,10))
+        clim = np.nanpercentile(gdf['h_EGM'].values,(10,90))
+        rasterio.plot.show(dem_ds,ax=ax)
+        ax.plot([xmin,xmax,xmax,xmin,xmin],[ymin,ymin,ymax,ymax,ymin]) # dem extent
+        gdf.plot('h_EGM',ax=ax,s=3,legend=True,cmap='inferno',vmin=clim[0],vmax=clim[1],legend_kwds={'label':'Elevation [m]'})
+            
+    print('total processing time for this DEM %f' %(time.time()-tSTART))   
+    return gdf
+
+
+def elevextrRasterio(gdf_dem_extent, dem_ds, demname):
+    # raster sampling: get nearest neighbour DEM elevation and add to geodataframe. Use all tracks and beams.
+    print(f'sampling nearest neighbour with rasterio.sample method - for {len(gdf_dem_extent)} points...') # 5.6 sec
+    t2=time.time()
+    # THIS WAS IN LAT/LON, CAUSING FAILURE OF ELEVATION EXTRACTION
+    coords = [(x,y) for x, y in zip(gdf_dem_extent.geometry.x, gdf_dem_extent.geometry.y)]
+    # sample
+    gdf_dem_extent[demname] =np.array([x[0] for x in dem_ds.sample(coords)],)
+    # set strange values out of range to nan:
+    gdf_dem_extent.loc[gdf_dem_extent[demname]<-200 ,demname] =np.nan
+    gdf_dem_extent.loc[gdf_dem_extent[demname]>9000 ,demname] =np.nan
+    # store also in the original dataframe
+    #gdf.loc[gdf['ID'].isin(gdf_dem_extent['ID']), demname]=gdf_dem_extent[demname]
+    print('elapsed time: %f' %(time.time()-t2))
+
+
+# def gdalslope(dem_file):
+#     # use gdal to compute the slope of the input DEM file
+#     #sp_file=os.path.splitext(dem_file)[0]+'_slope.tif'    
+#     #! gdaldem slope $dem_file $sp_file
+#     return sp_file
+
+# def gdalaspect(dem_file):
+#     # use gdal to compute the aspect of the input DEM file
+#     as_file=os.path.splitext(dem_file)[0]+'_aspect.tif'    
+#     #! gdaldem aspect $dem_file $as_file
+#     return as_file
+
+# def gdalhillshade(dem_file):
+#     # use gdal to compute the hillshade of the input DEM file
+#     hs_file=os.path.splitext(dem_file)[0]+'_hs.tif'    
+#     #! gdaldem hillshade $dem_file $hs_file
+#     return hs_file            
+
+    
+def elevextrNN(gdf_dem_extent, dem_ds, demname):
+    # raster sampling from ICESat-2 hackathlon from ca 2019, takes ca. twice the time of elevextrRasterio
+    print(f'sampling with nearest neighbour method - for {len(gdf_dem_extent)} points...') # 9 sec
+    t2=time.time()
+    del_time,elev = sample_near_nbor(dem_ds,gdf_dem_extent)
+    gdf_dem_extent[demname] = elev # but somehow, the mask doesn't get transported into the geodataframe.
+    # store also in the original dataframe
+    #gdf.loc[gdf['ID'].isin(gdf_dem_extent['ID']), demname]=elev
+    print('elapsed time: %f' %(time.time()-t2))
+    return gdf_dem_extent
+
+
+
+### --------- display geodataframes on raster ---------------------------
 
 def gdf_on_raster(gdf,ds,ax,shp,hs_ds,cmap='inferno'): 
     """
