@@ -114,15 +114,18 @@ def read_files(files_list, files_fld, bounds):
 
 # GeoDataFrame Points --> GeoDataFrame with MultiLineString
 
-def points2multilines(gf, datecol = 'date', beamcol = 'beam'):
+def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam'):
+	
     """Function to convert ICESat-2 ATL_08 data (or ATL_08 quicklook data)
     to a gdf with lines indicating the strips with data. 
     Usage: gf_lines = points2multilines(gf, datecol = 'date', beamcol = 'beam')
     Parameters: 
         gf      - input point geodataframe
+		step    - distance (in km) between the points in the resulting multiline
         datecol - column name indicating the overpass date. Default: 'date'
         beamcol - coulmn name indicating the beam identifier (six per overpass). Default: 'beam'
         """
+	
     # define the variable where data will be appended
     appender=[]
 
@@ -176,9 +179,9 @@ def points2multilines(gf, datecol = 'date', beamcol = 'beam'):
                         #add this line to the line list
                         multiline_i.append(geom)
                         
-                    # if this point is further than 10km from the last point in the multiline:
+                    # if this point is further than the "step" distance from the last point in the multiline:
                     else:
-                        if dist_from_last > 0.1:
+                        if dist_from_last > (step /111):
                         
                             #if so, the line should end at THIS point
                             geom=LineString([gf_sub.loc[start_index].geometry,gf_sub.loc[i].geometry])
@@ -213,5 +216,5 @@ def points2multilines(gf, datecol = 'date', beamcol = 'beam'):
     #concat the created geodataframes, and set the crs.
     gf_lines = pd.concat(appender) 
     gf_lines.crs='epsg:4326'    
->>>>>>> upstream/main
+
     return gf_lines
