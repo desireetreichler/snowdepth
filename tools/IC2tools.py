@@ -14,7 +14,7 @@ import h5py
 import numpy as np
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Point #, Polygon
+from shapely.geometry import Point, Polygon, LineString
 #import rasterio
 #from rasterio import features
 from pyproj import Proj   # assumes we only have one datum (WGMS84) 
@@ -452,6 +452,23 @@ def concat_gdf(gdf_list):
         gdf.crs='epsg:4326'  # sometimes the first geodataframe in a list may be empty, causing the result not to have a coordinate system.
     return gdf
     
+def makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326'):
+    """ Creates a gdf from bounding box coordinates.
+    Source: https://github.com/ICESAT-2HackWeek/2022-snow-dem-large/commits/main/notebooks/create_bbox.ipynb
+    
+    Usage: makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326')
+        min_x etc:  corner coordinates of the bounding box.
+        crs:    coordinate reference system the coordinates are in. 
+    Output: polygon as a geodataframe
+    """
+    # create polygon coordinates from values
+    coords = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y), (min_x, max_y)]
+    # convert bbox to polygon
+    poly_geom = Polygon(coords)
+    # apply crs and create geopandas
+    polygon = gpd.GeoDataFrame(index=[0], crs=crs, geometry=[poly_geom]) 
+    
+    return polygon
 
 def overlappingBB(gdfA, gdfB):
     """ Check whether the total bounding boxes of two geodataframes overlap.
@@ -465,8 +482,9 @@ def overlappingBB(gdfA, gdfB):
     return result
 
 def overlapping_totalbounds(tbA, tbB):
-    """ Check whether the total bounding boxes of two geodataframes overlap.
-    Usage: overlappingBB(tbA, tbB) - where tbA and B are arrays with total_bounds.
+    """ Check whether the total bounding boxes of two spatial entities overlap.
+    Usage: overlapping_totalbounds(tbA, tbB) - where tbA and B are arrays with 
+    total_bounds: [xmin, ymin, xmax, ymax].
     Returns True/False """
     xmin, ymin, xmax, ymax = tbA
     xminB, yminB, xmaxB, ymaxB = tbB
@@ -474,6 +492,16 @@ def overlapping_totalbounds(tbA, tbB):
     result2 = ((xminB < xmax) & (xmaxB > xmin) & (yminB < ymax) & (ymaxB > ymin) )
     result = result1|result2
     return result
+
+def dfxyclip(df,xminmax, yminmax, x='x',y='y'):
+    """ dclip = dfxyclip(df,xminmax, yminmax, x='x',y='y') 
+    clips a dataframe with coordinate columns (specify column names with 
+    optional arguments x, y) to the extents defined by xminmax, yminmax 
+    (two arrays of size two)."""
+    dfclip= df[(df[x]>=xminmax[0]) & (df[x]<=xminmax[1]) & (df[y]>=yminmax[0]) & (df[y]<=yminmax[1])]
+    return dfclip
+
+    
     
 def getIC2dates(gdf):
     """dates, dateint, currentdates, datecounts, datemonth= getIC2dates(gdf) 
@@ -493,4 +521,44 @@ def getIC2dates(gdf):
     datemonth=[x.month for x in dates]
     return dates, dateint, currentdates, datecounts, datemonth
 
-    
+def points2linestring(gf,datecol = 'dateint', beamcol = 'pb',other_cols=[]): 	
+    """Function to convert ICESat-2 ATL_08 data (or ATL_08 quicklook data)
+    to a gdf with lines indicating the strips with data. The tool assumes 
+    (and assigns) the crs epsg:4326, i.e. lat/lon in WGS84.
+    Usage: gf_lines = points2linestring(gf, datecol = 'dateint', beamcol = 'pb', other_cols=[])
+    Parameters: 
+        gf      - input point geodataframe
+        datecol - column name indicating the overpass date. Default: 'dateint'
+        beamcol - column name indicating the beam identifier (six per overpass). Default: 'pb'
+        other_cols - list of other column names to keep, e.g. RGT. (The value of 
+                     the first point for each line is retained). Default: None
+        """
+    appender=[]
+    dates=gf[datecol].unique()
+    beams=gf[beamcol].unique()
+
+    for date in dates:
+        for beam in beams:
+            gf_sub = gf[gf[datecol]==date]
+            gf_sub = gf_sub[gf_sub[beamcol]==beam]
+            
+            xylist = [xy for xy in zip(gf_sub.geometry.x,gf_sub.geometry.y)]
+            if len(xylist)<2:
+                continue
+            geom=LineString(xylist)
+            
+            #create the geodataframe with this Multiline and the date and beam information
+            gdf=gpd.GeoDataFrame(data={
+            'date':[date],
+            'beam':[beam],
+            'geometry':[geom]})          
+            # add other columns
+            if len(other_cols)>0:
+                for col in other_cols:
+                    gdf[col]=gf_sub[col].iloc[0]
+            
+            appender.append(gdf)                   
+    #concat the created geodataframes, and set the crs.
+    gf_lines = pd.concat(appender) 
+    gf_lines.crs='epsg:4326'    
+    return gf_lines    
