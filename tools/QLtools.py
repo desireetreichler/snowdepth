@@ -114,7 +114,7 @@ def read_files(files_list, files_fld, bounds):
 
 # GeoDataFrame Points --> GeoDataFrame with MultiLineString
 
-def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam'):
+def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam', other_cols = []):
 	
     """Function to convert ICESat-2 ATL_08 data (or ATL_08 quicklook data)
     to a gdf with lines indicating the strips with data. 
@@ -124,6 +124,8 @@ def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam'):
 		step    - distance (in km) between the points in the resulting multiline
         datecol - column name indicating the overpass date. Default: 'date'
         beamcol - coulmn name indicating the beam identifier (six per overpass). Default: 'beam'
+        other_cols - list of other column names to keep, e.g. RGT (the value of 
+                     the first point for each line is retained). Default: None
         """
 	
     # define the variable where data will be appended
@@ -168,7 +170,7 @@ def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam'):
 
                     # check if the following point is farer than about 100 m 
 
-                    if dist > 0.001 :
+                    if dist > 0.0013 : # changed fom 0.001 as it seemed to fail for polar areas
 
                         #if so, the line should end at THIS point
                         geom=LineString([gf_sub.loc[start_index].geometry,gf_sub.loc[i].geometry])
@@ -210,6 +212,11 @@ def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam'):
                 'date':[date],
                 'beam':[beam],
                 'geometry':[geom]})
+                
+                # add other columns
+                if len(other_cols)>0:
+                    for col in other_cols:
+                        gdf[col]=gf_sub.loc[0,col]
                 
                 appender.append(gdf)
                    
