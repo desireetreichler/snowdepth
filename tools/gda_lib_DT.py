@@ -23,6 +23,7 @@ from rasterio import features
 from pyproj import Proj   # assumes we only have one datum (WGMS84) 
 from math import floor
 import datetime
+import time
 
 #import rasterstats as rs
 
