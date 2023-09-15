@@ -20,7 +20,10 @@ from shapely.geometry import Point, Polygon, LineString
 from pyproj import Proj   # assumes we only have one datum (WGMS84) 
 #from math import floor
 import datetime
+import os
+from glob import glob
 #import time
+import pdb
 
 #import rasterstats as rs
 
@@ -133,15 +136,17 @@ def ATL08_2_gdf(ATL06_fn,dataset_dict):
         #convert to datafrmae
         df = pd.DataFrame(track)
         try:
-            df['p_b'] = str(track['pair'][0])+'_'+str(track['beam'][0])
+            df['pb'] = df['pair']*10+df['beam']
+            #df['p_b'] = str(track['pair'][0])+'_'+str(track['beam'][0])
         except:  # added, to account for errors - maybe where there is onluy one data point (?)
-            df['p_b'] = str(track['pair'])+'_'+str(track['beam'])
+            df['pb'] = track['pair']*10+track['beam']
+            #df['p_b'] = str(track['pair'])+'_'+str(track['beam'])
 
         df['geometry'] = df.apply(point_convert,axis=1)
         if i==0:
             df_final = df.copy()
         else:
-            df_final = df_final.append(df)
+            df_final = pd.concat((df_final,df))
         i = i+1
     gdf_final = gpd.GeoDataFrame(df_final,geometry='geometry',crs='epsg:4326')  # changed from +init-version to avoid the upcoming warning
     return gdf_final
@@ -182,12 +187,14 @@ def ATL03_to_dict(filename, dataset_dict=False, utmzone=False):
                 # check if a beam exists, if not, skip it
                 if '/gt%d%s/heights' % (pair, beam) not in h5f:
                     continue
+                #print('/gt%d%s/' % (pair, beam))
                 # loop over the groups in the dataset dictionary
                 temp={}
                 for group in dataset_dict.keys():
                     if group in ['geolocation']: # check whether this data is available for each photon or for each 20m segment only.
-                        segmentrate = 1
-                    else: segmentrate = 0
+                        segmentlevel = 1
+                    elif group in ['heights']:
+                        segmentlevel = 0
                     for dataset in dataset_dict[group]:
                         DS='/gt%d%s/%s/%s' % (pair, beam, group, dataset)
                         # since a dataset may not exist in a file, we're going to try to read it, and if it doesn't work, we'll move on to the next:
@@ -211,9 +218,10 @@ def ATL03_to_dict(filename, dataset_dict=False, utmzone=False):
                             except TypeError:# as e: # added this exception, as I got some type errors - temp[dataset] was 0.0
                                 pass  
                             # some data is only available at the 20 m segment rate (or even less). Fix this by duplicating
-                            if segmentrate:
+                            if segmentlevel==1:
                                 DS='/gt%d%s/%s/%s' % (pair, beam, 'geolocation', 'segment_ph_cnt')
                                 segment_ph_cnt=np.array(h5f[DS])
+                                #pdb.set_trace(); # for tracks with little/no actual data, 'segment_ph_cnt' values seem to sometimes be really high (500 times higher than normal), making this duplication fail
                                 temp2 = np.concatenate([np.repeat(y,x) for x,y in zip(segment_ph_cnt,temp[dataset])])
                                 temp[dataset]=temp2 # overwrite
                         except KeyError:# as e:
@@ -353,6 +361,13 @@ def ATL03_2_gdf(ATL03_fn,dataset_dict=False,aoicoords=False, filterbackground=Fa
         i = 0
         for track in data_dict:
             #1 track
+            # check that all data have the same length - sometimes, the multiplication with segment_ph_cnt fails. Set these to Nan.
+            nrdatapts = len(track['delta_time'])
+            for key in track.keys():
+                if len(track[key]) != nrdatapts:
+                    track[key]= np.empty_like(track['delta_time'])*np.nan
+                    if v: 
+                        print(f'dropped {key}: wrong nr of data points')
             #convert to datafrmae
             df = pd.DataFrame(track)
             # filter by aoi (owerwrite df)
@@ -365,15 +380,18 @@ def ATL03_2_gdf(ATL03_fn,dataset_dict=False,aoicoords=False, filterbackground=Fa
                 #df = df.loc[((df['signal_conf_ph'] >1 ) | (df['signal_conf_ph'] == -1 )) &  ((df['signal_conf_ph_landice'] >1)| (df['signal_conf_ph_landice'] == -1 ))]
             # add track/beam
             try:
-                df['p_b'] = str(track['pair'][0])+'_'+str(track['beam'][0])
+                df['pb'] = df['pair']*10+df['beam']
+                #df['p_b'] = str(track['pair'][0])+'_'+str(track['beam'][0])
             except:  # added, to account for errors - maybe where there is onluy one data point (?)
-                df['p_b'] = str(track['pair'])+'_'+str(track['beam'])
+                df['pb'] = track['pair']*10+track['beam']
+                #df['p_b'] = str(track['pair'])+'_'+str(track['beam'])
             # df['geometry'] = df.apply(point_covert,axis=1) # this did not work here??? but for ATL08 yes? strange.
             # df['geometry'] = [Point(xy) for xy in zip(df.lon_ph, df.lat_ph)] # this works, but is slow
             if i==0:
                 df_final = df.copy()
             else:
-                df_final = df_final.append(df)
+                df_final=pd.concat([df,df_final]) # possible solution? Not quite yet it seems - FutureWarning: The frame.append method is deprecated and will be removed from pandas in a future version. Use pandas.concat instead.
+                #df_final = df_final.append(df)
             i = i+1
         try:
             gdf_final = gpd.GeoDataFrame(df_final,geometry=gpd.points_from_xy(x=df_final.lon_ph, y=df_final.lat_ph),crs='epsg:4326')  # changed from +init-version to avoid the upcoming warning
@@ -386,7 +404,7 @@ def ATL03_2_gdf(ATL03_fn,dataset_dict=False,aoicoords=False, filterbackground=Fa
 
 # wrapper to handle lists of granules, and add some custom parameters
 
-def hdf2gdf(ATL_list, ATL_version=8, dataset_dict={}):
+def hdf2gdf(ATL_list, ATL_version=8, dataset_dict={}, aoicoords=False, filterbackground=False, utmzone=False, v=False):
     """ 
     Load data from granules and add to a single gdf. Add ID number and date
     to data rows.
@@ -395,6 +413,17 @@ def hdf2gdf(ATL_list, ATL_version=8, dataset_dict={}):
     ATL_version:  8 or 3, default: 8
     dataset_dict: dictionary for which datasets to add to the dataframe. 
                   Default available for ATL08 and ALT03 (see function for details).
+        additionally, for ATL03: aoicoords -> [xmin,ymin,xmax,ymax] if set, the data will be clipped to that bounding box.
+                      filterbackground -> default False, otherwise set to remove values (e.g. [-2, -1,0, 1], only excluded if true for BOTH land (standard) signal_conf_ph and the one for land ice)
+                      v: if set to True, the function prints the current file - keeping track of progress in a loop.
+                      
+                      signal_conf_ph meaning/values available: Confidence level associated with each photon event selected as signal. 
+                      0=noise. 1=added to allow for buffer but algorithm classifies as background; 2=low; 3=med; 4=high). This parameter 
+                      is a 5xN array where N is the number of photons in the granule, and the 5 rows indicate signal finding for each
+                      surface type (in order: land, ocean, sea ice, land ice and inland water). Events not associated with a specific surface
+                      type have a confidence level of ­1. Events evaluated as TEP returns have a confidence level of ­2. flag_values: ­2, ­1, 0, 1, 2, 3, 4 
+                      flag_meanings : possible_tep not_considered noise buffer low medium high
+
     Returns:      gdf: gdf with all points (rows) and parameters in data_dict (columns)
                   dt: list of dates with data
     """
@@ -416,7 +445,8 @@ def hdf2gdf(ATL_list, ATL_version=8, dataset_dict={}):
     if ATL_version==8:     
            gdf_list = [(ATL08_2_gdf(x, dataset_dict)) for x in ATL_list]  # used my own, as the toolbox one caused some errors - maybe for a dataset that had just one point?
     elif ATL_version==3:    
-           gdf_list = [(ATL03_2_gdf(x, dataset_dict)) for x in ATL_list]  # used my own, as the toolbox one caused some errors - maybe for a dataset that had just one point?
+           gdf_list = [(ATL03_2_gdf(x, dataset_dict, aoicoords=aoicoords, filterbackground=filterbackground, 
+                                    utmzone=utmzone, v=v)) for x in ATL_list]  # used my own, as the toolbox one caused some errors - maybe for a dataset that had just one point?
            
     # concatenate to a single geodataframe 
     gdf = concat_gdf(gdf_list)
@@ -447,9 +477,13 @@ def concat_gdf(gdf_list):
     """
     #from https://stackoverflow.com/questions/48874113/concat-multiple-shapefiles-via-geopandas
     gdf = pd.concat([gdf for gdf in gdf_list]).pipe(gpd.GeoDataFrame)
-    gdf.crs = (gdf_list[0].crs)
-    if gdf.crs is None:
-        gdf.crs='epsg:4326'  # sometimes the first geodataframe in a list may be empty, causing the result not to have a coordinate system.
+    try:
+        gdf.crs = (gdf_list[0].crs)
+        if gdf.crs is None:
+            gdf.crs='epsg:4326'  # sometimes the first geodataframe in a list may be empty, causing the result not to have a coordinate system.
+    except: 
+        print('Warning: no CRS assigned')
+        pass
     return gdf
     
 def makebboxgdf(min_x, min_y, max_x, max_y, crs='EPSG:4326'):
@@ -562,3 +596,31 @@ def points2linestring(gf,datecol = 'dateint', beamcol = 'pb',other_cols=[]):
     gf_lines = pd.concat(appender) 
     gf_lines.crs='epsg:4326'    
     return gf_lines    
+
+### Related to coregistration
+# ----------------------------------------------------------------
+def savecoreginfo(destpath, coregobj, fileprefix = 0):
+    """ savecoreginfo(destpath, coregobj, fileprefix=0)
+        saves the coregistration information of coregobj produced by xdem: 
+        - store the coreg coefficients in a textfile in destination folder destpath, 
+        - and also move produced plots stored in the working dir (if any) there. 
+        - if fileprefix = 1, treat the last part of the destpath as a file prefix rather than a new subfolder.
+    """
+    if fileprefix:
+        destpath, prefix = os.path.split(destpath)
+    else:
+        prefix = ''
+    isdir = os.path.exists(destpath)
+    if not isdir: os.mkdir(destpath)
+    with open (destpath+'/'+prefix+'coreg_matrix.csv', 'w') as f: np.savetxt(f,coregobj.to_matrix(),delimiter=";")
+    with open (destpath+'/'+prefix+'coreg_meta.txt', 'w') as f: f.write(str(coregobj._meta))
+    currd = os.getcwd()
+    fs = glob(currd+'/it*')
+    for f in fs:
+        fn = os.path.basename(f)
+        try:
+            os.rename(f,destpath+'/'+prefix+fn)
+        except FileExistsError as e:
+            print("replacing existing file {destpath+'/'+fn}")
+            os.remove(destpath+'/'+prefix+fn)
+            os.rename(f,destpath+'/'+prefix+fn)
