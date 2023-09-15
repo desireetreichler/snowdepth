@@ -26,8 +26,17 @@ try:
     import contextily as ctx
 except: pass
 
-gpd.io.file.fiona.drvsupport.supported_drivers['KML']='rw' # native gpd has no functionality to read kml
-gpd.io.file.fiona.drvsupport.supported_drivers['KMZ']='rw' # native gpd has no functionality to read kml
+try:  
+    gpd.io.file.fiona.drvsupport.supported_drivers['KML']='rw' # native gpd has no functionality to read kml
+    gpd.io.file.fiona.drvsupport.supported_drivers['KMZ']='rw' # native gpd has no functionality to read kml
+except:
+    from fiona.drvsupport import supported_drivers # fix from https://stackoverflow.com/questions/72960340/attributeerror-nonetype-object-has-no-attribute-drvsupport-when-using-fiona
+    supported_drivers['LIBKML'] = 'rw'
+try:
+    from fiona.drvsupport import supported_drivers # fix from https://stackoverflow.com/questions/72960340/attributeerror-nonetype-object-has-no-attribute-drvsupport-when-using-fiona
+    supported_drivers['LIBKML'] = 'rw'
+except: 
+    gpd.io.file.fiona.drvsupport.supported_drivers['KML']='rw' # native gpd has no functionality to read kml
 
 
 # import custom modules
@@ -197,6 +206,7 @@ def GTdiststats(currRGT, gdf_curr, cycle, figprefix, p):
                 #fig,ax = plt.subplots(figsize=(5,15))
             for b in [0,1]:
                 gdf_pb=gdf_curr[(gdf_curr['pair']==pair) & (gdf_curr['beam']==b)]
+                gdf_pb=gdf_pb.reset_index()
                 absdy=list(abs(gdf_pb.geometry.y-y))
                 #dy=list(gdf_pb.geometry.y-y)
                 try:
@@ -232,6 +242,7 @@ def GTdiststats(currRGT, gdf_curr, cycle, figprefix, p):
                             # if smaller, take ind-1 
                             inda = ind-1
                             indb = ind
+                            if inda <0: raise Exception 
                     except:
                         #print('outside data range')
                         continue
@@ -418,8 +429,11 @@ def predictGTortho(currRGT, s, smin=-1, smax=-1):
             Axj = np.sin(alpha)*j + RGTx
             Ayj = -np.cos(alpha)*j + RGTy
             points = GeoSeries(map(Point, zip(Axj, Ayj)))
-            line = LineString(points.tolist())
-            linelist.append({'pb':k, 's':j, 'RGT':currRGTnr, 'date':currdate,'cycle':currcycle,'track':currtrack,'stype':tp,'ascending':ascdesc,'predicted':'ortho', 'geometry':line })
+            try:
+                line = LineString(points.tolist())
+                linelist.append({'pb':k, 's':j, 'RGT':currRGTnr, 'date':currdate,'cycle':currcycle,'track':currtrack,'stype':tp,'ascending':ascdesc,'predicted':'ortho', 'geometry':line })
+            except:
+                pass
     GT_gdf = gpd.GeoDataFrame(linelist)
     #GT_gdf.plot()
     # to return individual lines instead:
@@ -710,7 +724,7 @@ def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
     adds a timestamp string to each RGT of the specified cycle number. The function
     takes the average/middle timestamps from all timestamp points within the 
     input shapefile shp, a gdf with a square bounding box.
-    The input RGT gdf (previously clipped with shp) needs to havean integer 
+    The input RGT gdf (previously clipped with shp) needs to have an integer 
     column named "RGT" with the RGT numbers (run e.g. cleanRGT to achieve this).
     Note that each RGT can only be once in the RGT_gdf!! (i.e. no strange clipping shapes)
     v=1: verbose, prints all loaded tracks etc.
@@ -733,7 +747,7 @@ def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
     RGTmatches = [(x in clippedRGT.RGT.values) for x in RGTnrs]
     RGTtrackstoload = [i for (i,v) in zip(RGTtracks,  RGTmatches) if v] 
     
-    timestamp_list=[None]*len(RGTtrackstoload)
+    #timestamp_list=pd.DataFrame()
     
     # convert shp to UTM and add a 10km buffer, reconvert to lat/lon
     crs = getUTMcrs(shp)
@@ -752,9 +766,10 @@ def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
         for t in f:
             if t[:3]=='RGT':
                 kml = gpd.read_file(track,driver='KML',layer=t) 
+
                 # append
                 try: 
-                    timestamps_gdf=timestamps_gdf.append(kml)
+                    timestamps_gdf=pd.concat([timestamps_gdf,kml])
                 except: # appending to the initialised variable somehow does not work, replace the first time a track is found (an dan error thrown)
                     if v: 
                         print('could not append timestamp')    
@@ -763,6 +778,8 @@ def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
                         timestamps_gdf=kml
                         first = False
                     else: break
+        
+        currrgtvalue = int(t.split(' ')[1])
         # clip
         timestamps_gdf=timestamps_gdf.to_crs(bufferll.crs)
         timestamps_gdf = timestamps_gdf.reset_index(drop=True)
@@ -773,11 +790,11 @@ def loadRGTtimestamps(clippedRGT, RGTfolder, cycle,shp, v=1):
         timesplit = [x[0][-20:] for x in timesplit]
         # take the middle value
         timestamp = timesplit[int(np.floor(len(timesplit)/2))]
-        timestamp_list[k] = timestamp
         
-    # add the result to the clipped gdf:
-    clippedRGT['timestamp']=timestamp_list        
-    
+        #add to the clipped gdf with same RGT:
+        rgtI = clippedRGT.RGT==currrgtvalue
+        clippedRGT.loc[rgtI,'timestamp']=timestamp
+
     if v:
         print('elapsed time: %f' %(time.time()-ti))   
     return clippedRGT
@@ -1079,7 +1096,8 @@ def loadRGTs(RGTtracks,v=0):
             kml['date']=currdate
             #tracklist.append(track)
             try: 
-                RGT_gdf=RGT_gdf.append(kml)
+                RGT_gdf = pd.concat([RGT_gdf, kml])
+                #RGT_gdf=RGT_gdf.append(kml) # this caused a future warning
             except: # appending to the initialised variable somehow does not work, replace the first time a track is found (an dan error thrown)
                 if v: 
                     print('could not append track')    
