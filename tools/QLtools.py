@@ -135,10 +135,12 @@ def points2multilines(gf, step = 10, datecol = 'date', beamcol = 'beam', other_c
 
     # iterate through the dates and beams we have
     dates=gf[datecol].unique()
+    print(f'found data from {len(dates)} dates')
     beams=gf[beamcol].unique()
 
 
     for date in dates:
+        print(f'Processing data from date {date}...')
         for beam in beams:
 
             # select the relevant data 
