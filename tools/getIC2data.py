@@ -125,13 +125,13 @@ def getIC2data(uid,email,pswd, short_name,start_date, end_date, foldername, requ
     
     if aoi == '1':
          # Input lower left longitude in decimal degrees
-        LL_lon = aoilist[0] #'71.3'
+        LL_lon = str(aoilist[0]) #'71.3'
          # Input lower left latitude in decimal degrees
-        LL_lat = aoilist[1]#'39.45'
+        LL_lat = str(aoilist[1])#'39.45'
          # Input upper right longitude in decimal degrees
-        UR_lon = aoilist[2]#'71.9'
+        UR_lon = str(aoilist[2])#'71.9'
          # Input upper right latitude in decimal degrees
-        UR_lat = aoilist[3]#'39.85'
+        UR_lat = str(aoilist[3])#'39.85'
         
     if aoi == '2':
             #create list of x (longitude) values in decimal degrees
