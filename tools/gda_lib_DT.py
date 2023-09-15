@@ -734,6 +734,68 @@ def elevextrRasterio(gdf_dem_extent, dem_ds, demname):
     print('elapsed time: %f' %(time.time()-t2))
 
 
+def ic2dfelevextract(df,dem_file,demname, lon='longitude',lat='latitude', date=None):
+    """ Extract elevation data from a DEM at point locations from a dataframe.
+    The function is based on rasterio. Adds a new column to the df.
+    CAUTION: the function does not check whether the projections agree! Use 
+             ic2elevextract instead, if you need that. 
+    Usage: df = ic2dfelevextract(df,dem_file,demname, lon='longitude',lat='latitude')
+    df:        point dataframe
+    dem_file:   location of a DEM file (will be opened with rasterio)
+    demname:    name of the DEM, will be the column name for the extracted elevation
+    lon:       optional, name of the column with lon/x coordinates. Default: 'longitude'
+    lat:       optional, name of the column with lat/y coordinates. Default: 'latitude'
+    date:      optional, one single date (integer) present in the 'date' column - 
+                         elevextract done only for points of this date 
+    """                           
+    tSTART=time.time()
+   
+    # open the elevation file
+    dem_ds = rasterio.open(dem_file)
+    
+    # ensure that the df has an ID column 
+    if ~('ID' in df.columns):
+        removeID = True
+        df['ID'] = np.arange(1, len(df) + 1)
+    else: 
+        removeID = False
+
+    # clip to dem extent  
+    xmin,ymin,xmax,ymax = dem_ds.bounds
+    if date != None: 
+        df_dem_extent= df[(df[lon]>=xmin) & (df[lon]<=xmax) & (df[lat]>=ymin) & (df[lat]<=ymax) & (df['date']==date)]
+    else:
+        df_dem_extent= df[(df[lon]>=xmin) & (df[lon]<=xmax) & (df[lat]>=ymin) & (df[lat]<=ymax)]
+        
+    # sample elevations 
+    #print('sample elevations for '+demname+'...')
+    print(f'sampling {len(df_dem_extent)} points...')
+    coords = [(x,y) for x, y in zip(df_dem_extent[lon], df_dem_extent[lat])]
+    # sample
+    df_dem_extent[demname] =np.array([x[0] for x in dem_ds.sample(coords)],)
+    # set strange values out of range to nan:
+    df_dem_extent.loc[df_dem_extent[demname]<-200 ,demname] =np.nan
+    df_dem_extent.loc[df_dem_extent[demname]>9000 ,demname] =np.nan
+    # locate in original gdf
+    df.loc[df['ID'].isin(df_dem_extent['ID']), demname]=df_dem_extent[demname]
+    
+    if removeID:
+        # never remove ID... seems not to work reliably
+        print()
+        #df=df.drop(columns={'ID'})
+    
+    if 0: # debug plot
+        fig,ax = plt.subplots(figsize=(10,10))
+        clim = np.nanpercentile(df[demname].values,(10,90))
+        rasterio.plot.show(dem_ds,ax=ax)
+        ax.plot([xmin,xmax,xmax,xmin,xmin],[ymin,ymin,ymax,ymax,ymin]) # dem extent
+        plt.scatter(df.lon,df.lat,df.demname,ax=ax,s=3,legend=True,cmap='inferno',vmin=clim[0],vmax=clim[1],legend_kwds={'label':'Elevation [m]'})
+            
+    print('total processing time for this DEM %f' %(time.time()-tSTART))   
+    return df
+
+
+
 # def gdalslope(dem_file):
 #     # use gdal to compute the slope of the input DEM file
 #     #sp_file=os.path.splitext(dem_file)[0]+'_slope.tif'    
